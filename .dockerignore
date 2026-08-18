@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.atomic_orbital_cache/
+.DS_Store
+.git/
+README.md
+docs/
