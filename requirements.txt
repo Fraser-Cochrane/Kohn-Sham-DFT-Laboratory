@@ -1,0 +1,8 @@
+Flask
+gunicorn
+numpy
+scipy
+plotly
+scikit-image
+pyscf
+basis-set-exchange
