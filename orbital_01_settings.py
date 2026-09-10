@@ -87,7 +87,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.linalg import eigh_tridiagonal
 from scipy.ndimage import label as connected_components
 from skimage.measure import marching_cubes
-from flask import Flask, Response, redirect, render_template_string, request, send_from_directory, url_for
+from flask import Flask, Response, redirect, render_template_string, request, send_from_directory
 
 try:
     from scipy.special import sph_harm_y
@@ -361,4 +361,3 @@ GROUND_STATE_2S = {
     symbol: NEUTRAL_GROUND_STATE_2S[index]
     for index, symbol in enumerate(ELEMENT_SYMBOLS)
 }
-

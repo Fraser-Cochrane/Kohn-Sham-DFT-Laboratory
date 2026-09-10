@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.atomic_orbital_cache/
+web.sock
+*.log
+.DS_Store

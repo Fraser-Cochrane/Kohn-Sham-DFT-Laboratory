@@ -379,7 +379,7 @@ HOME_TEMPLATE = r'''<!doctype html>
       <div class="periodic" id="periodic"></div>
     </section>
 
-    <form class="config" id="config" method="post" action="/calculate">
+    <form class="config" id="config" method="post" action="calculate">
       <div class="selected-card" id="selectedCard">
         <div class="big-z" id="bigZ"></div>
         <div class="big-symbol" id="bigSymbol"></div>
@@ -935,9 +935,8 @@ ERROR_TEMPLATE = r'''<!doctype html>
     <h1>Calculation could not be completed</h1>
     <p>Review the selected ion, spin and quantum numbers, then try again.</p>
     <div class="details">{{ message }}</div>
-    <a href="/">Return to the periodic table</a>
+    <a href="../">Return to the periodic table</a>
   </main>
 </body>
 </html>'''
-
 

@@ -130,7 +130,7 @@ main {{ min-width:0; padding:28px; }}
   </div>
   <div class="menu-label">Choose view</div>
   {menu_html}
-  <a class="home-button" href="/">Return to main menu</a>
+  <a class="home-button" href="../">Return to main menu</a>
   <div class="summary">Drag 3D views to rotate.<br>Scroll to zoom.<br>Use each plot toolbar to export an image.</div>
 </aside>
 <main>
@@ -172,7 +172,7 @@ main {{ min-width:0; padding:28px; }}
 const buttons = Array.from(document.querySelectorAll('.menu-button'));
 const panels = Array.from(document.querySelectorAll('.view-panel'));
 const plotConfig = {plot_config_json};
-const lazyBase = '/api/result-tabs/{visual_key}/';
+const lazyBase = '../api/result-tabs/{visual_key}/';
 const panelLoads = new Map();
 async function ensurePanelLoaded(panelId) {{
   const panel = document.getElementById(`panel-${{panelId}}`);
@@ -495,5 +495,4 @@ def calculate_current_selection() -> Path:
     print("Use the website menu to switch between all five visualizations.")
     print(f"Total runtime:             {time.perf_counter() - start:.1f} s")
     return html_path
-
 

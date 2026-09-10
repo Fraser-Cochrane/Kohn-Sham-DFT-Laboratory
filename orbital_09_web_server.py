@@ -132,7 +132,9 @@ def calculate_route():
             ),
             400,
         )
-    result_url = url_for("result_file", filename=result.name)
+    # A relative result URL keeps the application functional at the domain
+    # root and when Apache mounts it beneath /atomic-orbitals/.
+    result_url = f"results/{result.name}"
     if request.headers.get("X-Orbital-Progress") == "1":
         return Response(
             json.dumps({"result_url": result_url}),
