@@ -393,7 +393,7 @@ def load_or_build_common_orbital_bank(
     potentials: dict[str, np.ndarray],
     relativistic: bool,
 ) -> tuple[float, np.ndarray, np.ndarray, bool, str, str]:
-    """Load one mmap radial family and return its selected n/l state."""
+    """Load one cached radial family and return its selected n/l state."""
     family_indices_valid = (
         1 <= N_QUANTUM <= COMMON_ORBITAL_MAX_N
         and 0 <= L_QUANTUM < N_QUANTUM
@@ -503,5 +503,4 @@ def load_or_build_common_orbital_bank(
             relativistic=relativistic,
         )
         return energy, interior_r, radial_function, False, family_key, state_key
-
 

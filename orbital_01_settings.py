@@ -15,7 +15,7 @@ Edit USER SETTINGS and run:
 
 Install:
 
-    python -m pip install numpy scipy plotly scikit-image pyscf flask basis-set-exchange
+    python -m pip install -r requirements.txt
 
 The program performs an atomic LDA Kohn-Sham calculation, spherical-averages
 the DFT spin density, and constructs
@@ -32,10 +32,11 @@ used.
 
 Atomic DFT fields, radial families, angular data, Cartesian grids, surface
 meshes, and derived plot data are cached separately according to their physical
-dependencies. Hot numerical arrays use uncompressed, memory-mapped NPY files;
-exact rendered selections are reused across server restarts.
+dependencies. Numerical arrays are compressed independently so cache hits load
+only the fields they need, and exact rendered selections are reused across
+server restarts.
 
-FINAL INTERACTIVE VERSION: LOGIC MAP
+APPLICATION LOGIC MAP
 
 1. The Flask form validates the atom, charge, spin, quantum numbers and quality.
 2. A quality profile applies one consistent set of SCF and rendering parameters.
@@ -63,6 +64,7 @@ be represented by the scalar v_xc(r) used here.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -70,11 +72,13 @@ import re
 import shutil
 import threading
 import time
+import warnings
 import webbrowser
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+import mcubes
 import plotly.graph_objects as go
 from plotly.io import to_html
 try:
@@ -86,7 +90,6 @@ from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.interpolate import RegularGridInterpolator
 from scipy.linalg import eigh_tridiagonal
 from scipy.ndimage import label as connected_components
-from skimage.measure import marching_cubes
 from flask import Flask, Response, redirect, render_template_string, request, send_from_directory
 
 try:
@@ -166,13 +169,23 @@ DOT_MAP_POINTS = 8_000          # Probability-weighted dots in density view
 DOT_MAP_SEED = 12345            # Reproducible dot sampling
 
 ENABLE_PERSISTENT_CACHE = True
-CACHE_FORMAT_VERSION = 19       # Increment whenever cached numerics change
-RESULT_RENDER_VERSION = 17      # Increment whenever displayed formatting changes
+CACHE_FORMAT_VERSION = 20       # Increment whenever cached numerics change
+RESULT_RENDER_VERSION = 18      # Increment whenever displayed formatting changes
 RUNTIME_MODEL_VERSION = 3       # Ignore calibration ratios from older cost models
 CACHE_DIRECTORY = Path(os.environ.get("ATOMIC_ORBITAL_CACHE_DIR", ".atomic_orbital_cache"))
-CACHE_MAX_BYTES = 2 * 1024**3   # Oldest cache entries are removed above 2 GiB
+try:
+    CACHE_MAX_MIB = max(
+        64,
+        int(os.environ.get("ATOMIC_ORBITAL_CACHE_MAX_MB", "256")),
+    )
+except ValueError:
+    CACHE_MAX_MIB = 256
+CACHE_MAX_BYTES = CACHE_MAX_MIB * 1024**2
+CACHE_COMPRESS_ARRAYS = os.environ.get(
+    "ATOMIC_ORBITAL_COMPRESS_CACHE", "1"
+).strip().lower() not in {"0", "false", "no", "off"}
 COMMON_ORBITAL_MAX_N = 7        # Highest n cached in each requested spin/l family
-RESULT_CACHE_MIN_BYTES = 20_000 # Reject incomplete/corrupt HTML cache entries
+RESULT_CACHE_MIN_BYTES = 5_000  # Reject incomplete/corrupt HTML cache entries
 PYSCF_MAX_MEMORY_MB = 2_000
 PYSCF_VERBOSE = 2
 

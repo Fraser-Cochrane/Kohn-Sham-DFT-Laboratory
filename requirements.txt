@@ -1,8 +1,7 @@
-Flask
-gunicorn
-numpy
-scipy
-plotly
-scikit-image
-pyscf
-basis-set-exchange
+Flask>=3.0
+gunicorn>=22
+numpy>=1.26,<3
+scipy>=1.11
+plotly>=5.20
+PyMCubes==0.1.6
+pyscf>=2.6

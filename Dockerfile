@@ -8,6 +8,8 @@ ENV PYTHONUNBUFFERED=1
 
 # Store reusable calculation results on the Render persistent disk.
 ENV ATOMIC_ORBITAL_CACHE_DIR=/var/data/atomic-orbital-cache
+ENV ATOMIC_ORBITAL_CACHE_MAX_MB=256
+ENV ATOMIC_ORBITAL_COMPRESS_CACHE=1
 
 # PySCF needs an existing, writable directory for temporary calculation files.
 ENV PYSCF_TMPDIR=/tmp/pyscf
@@ -28,11 +30,16 @@ COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install \
         --no-cache-dir \
+        --no-compile \
         --prefer-binary \
         -r /app/requirements.txt
 
 # Copy the master and all nine component scripts into the image.
 COPY . /app
+
+# Scientific wheels include test suites and static type declarations that are
+# useful to developers but never imported by this production application.
+RUN python scripts/prune_runtime.py --allow-system-prefix
 
 # Create the directories during the build. The start command repeats this step
 # because Render's persistent-disk mount can replace /var/data at runtime.

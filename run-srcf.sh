@@ -9,10 +9,14 @@ cd "$APP_ROOT"
 source "$APP_ROOT/.venv/bin/activate"
 mkdir -p "$RUNTIME_ROOT/cache" "$RUNTIME_ROOT/tmp" "$RUNTIME_ROOT/logs"
 rm -f "$SOCKET_PATH"
+: > "$RUNTIME_ROOT/logs/error.log"
 
 export ATOMIC_ORBITAL_CACHE_DIR="$RUNTIME_ROOT/cache"
+export ATOMIC_ORBITAL_CACHE_MAX_MB=128
+export ATOMIC_ORBITAL_COMPRESS_CACHE=1
 export PYSCF_TMPDIR="$RUNTIME_ROOT/tmp"
 export TMPDIR="$RUNTIME_ROOT/tmp"
+export PYTHONDONTWRITEBYTECODE=1
 export PYTHONUNBUFFERED=1
 
 exec gunicorn \
@@ -21,6 +25,6 @@ exec gunicorn \
   --worker-class gthread \
   --threads 4 \
   --timeout 600 \
-  --access-logfile "$RUNTIME_ROOT/logs/access.log" \
+  --access-logfile /dev/null \
   --error-logfile "$RUNTIME_ROOT/logs/error.log" \
   atomic_orbital_master:app

@@ -8,6 +8,52 @@
 #
 from __future__ import annotations
 
+
+def extract_isosurface_mesh(
+    density: np.ndarray,
+    threshold: float,
+    spacing: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract a compact triangle mesh with the lightweight PyMCubes engine."""
+    step = max(1, int(MARCHING_CUBES_STEP))
+    sampled_density = writable_compiled_array(
+        np.asarray(density)[::step, ::step, ::step],
+        dtype=np.float32,
+    )
+    # PyMCubes 0.1.6 uses a NumPy shape-assignment idiom that is deprecated but
+    # remains correct. Keep application logs clean until its next wheel release.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Setting the shape on a NumPy array has been deprecated.*",
+            category=DeprecationWarning,
+        )
+        vertices, faces = mcubes.marching_cubes(
+            sampled_density,
+            float(threshold),
+        )
+    vertices = np.asarray(vertices, dtype=np.float64) * (spacing * step)
+    faces = np.asarray(faces, dtype=np.int32)
+    if vertices.ndim != 2 or vertices.shape[1:] != (3,):
+        raise RuntimeError("Marching cubes returned invalid vertices.")
+    if faces.ndim != 2 or faces.shape[1:] != (3,):
+        raise RuntimeError("Marching cubes returned invalid faces.")
+
+    # PyMCubes normally emits valid triangles. Removing any zero-area faces
+    # provides the same safety guarantee previously requested from the larger
+    # meshing dependency without retaining that package.
+    if faces.size:
+        triangles = vertices[faces]
+        twice_area = np.cross(
+            triangles[:, 1] - triangles[:, 0],
+            triangles[:, 2] - triangles[:, 0],
+        )
+        keep = np.einsum("ij,ij->i", twice_area, twice_area) > 1.0e-24
+        faces = faces[keep]
+    if not faces.size:
+        raise RuntimeError("The selected isodensity surface contains no triangles.")
+    return vertices, faces
+
 def angular_wavefunction(theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
     """Return complex or conventional real/tesseral Y_l^m."""
     def harmonic(m_value: int) -> np.ndarray:
@@ -112,7 +158,7 @@ def load_or_build_spatial_grid(
     orbital_r: np.ndarray,
     radial_function: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, bool]:
-    """Reuse the mmap Cartesian grid for a fixed radial and angular state."""
+    """Reuse the cached Cartesian grid for a fixed radial and angular state."""
     path = cache_bundle("spatial-grids", spatial_key)
     loaded = load_array_bundle(path, ("axis", "wavefunction", "density"))
     if loaded is not None:
@@ -130,7 +176,7 @@ def load_or_build_spatial_grid(
                 and density.shape == expected
                 and np.isfinite(half_width)
             ):
-                print("Persistent cache hit: mmap Cartesian orbital grid.")
+                print("Persistent cache hit: Cartesian orbital grid.")
                 return axis, wavefunction, density, half_width, True
         except (KeyError, TypeError, ValueError):
             pass
@@ -255,7 +301,7 @@ def load_or_build_isosurface_mesh(
                 and np.isfinite(threshold)
                 and np.isfinite(achieved)
             ):
-                print("Persistent cache hit: mmap isosurface mesh.")
+                print("Persistent cache hit: isosurface mesh.")
                 return arrays, threshold, achieved, True
         except (KeyError, TypeError, ValueError):
             pass
@@ -275,13 +321,7 @@ def load_or_build_isosurface_mesh(
             f"Removed {removed_voxels} sub-resolution isosurface voxels "
             "before meshing."
         )
-    vertices, faces, _normals, _values = marching_cubes(
-        writable_compiled_array(mesh_density, dtype=np.float32),
-        level=threshold,
-        spacing=(spacing, spacing, spacing),
-        step_size=MARCHING_CUBES_STEP,
-        allow_degenerate=False,
-    )
+    vertices, faces = extract_isosurface_mesh(mesh_density, threshold, spacing)
     vertices += float(axis[0])
     surface_wavefunction = interpolate_surface_values(axis, wavefunction, vertices)
     arrays = {
@@ -305,5 +345,3 @@ def load_or_build_isosurface_mesh(
         if remapped is not None:
             return remapped[0], threshold, achieved, False
     return arrays, threshold, achieved, False
-
-

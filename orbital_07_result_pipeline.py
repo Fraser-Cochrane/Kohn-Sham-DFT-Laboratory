@@ -63,7 +63,6 @@ def write_results_website(
             f'{plot_markup}</section>'
         )
     panels_html = "\n".join(panels)
-    plotly_javascript = get_plotlyjs()
     plot_config_json = json.dumps(plot_config, separators=(",", ":"))
     element_symbol = parse_ion_name(ION)[0]
     isotope_html = (
@@ -118,7 +117,7 @@ main {{ min-width:0; padding:28px; }}
 .math {{ white-space:nowrap; }}
 @media (max-width:850px) {{ .app {{ grid-template-columns:1fr; }} aside {{ position:relative; height:auto; }} main {{ padding:16px; }} .topbar {{ flex-direction:column; }} .metric-row {{ justify-content:flex-start; }} }}
 </style>
-<script>{plotly_javascript}</script>
+<script src="../assets/plotly.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -252,11 +251,11 @@ def save_radial_data(
     potentials: dict[str, np.ndarray],
     atomic_key: str,
 ) -> Path:
-    """Save radial DFT density, potentials, and Z_eff(r) to CSV."""
-    path = cache_file("radial-data", atomic_key, ".csv")
+    """Save radial DFT density, potentials, and Z_eff(r) as compressed CSV."""
+    path = cache_file("radial-data", atomic_key, ".csv.gz")
     if path is None:
         ion_slug = re.sub(r"[^A-Za-z0-9]+", "_", ION).strip("_")
-        path = Path(f"{ion_slug}_DFT_spatial_Zeff.csv").resolve()
+        path = Path(f"{ion_slug}_DFT_spatial_Zeff.csv.gz").resolve()
     if path.is_file() and path.stat().st_size > 200:
         return path
     table = np.column_stack(
@@ -276,7 +275,13 @@ def save_radial_data(
         f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
     )
     try:
-        np.savetxt(temporary, table, delimiter=",", header=header, comments="")
+        with gzip.open(
+            temporary,
+            mode="wt",
+            encoding="utf-8",
+            compresslevel=6,
+        ) as handle:
+            np.savetxt(handle, table, delimiter=",", header=header, comments="")
         temporary.replace(path)
     except OSError as exc:
         print(f"Radial CSV export skipped because it could not be written: {exc}")
@@ -495,4 +500,3 @@ def calculate_current_selection() -> Path:
     print("Use the website menu to switch between all five visualizations.")
     print(f"Total runtime:             {time.perf_counter() - start:.1f} s")
     return html_path
-

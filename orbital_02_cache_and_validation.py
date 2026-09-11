@@ -10,6 +10,65 @@ from __future__ import annotations
 
 CACHE_LOCK = threading.RLock()
 _CACHE_WARNING_SHOWN = False
+_INITIALIZED_CACHE_ROOTS: set[Path] = set()
+
+# Only these application-owned children may be removed during a cache-format
+# migration. Restricting cleanup to an allow-list makes a misconfigured cache
+# root unable to erase unrelated user files.
+_CACHE_CATEGORIES = frozenset(
+    {
+        "angular-plot-data",
+        "contour-data",
+        "density-dot-data",
+        "dft-fields",
+        "isosurface-meshes",
+        "lazy-tab-figures",
+        "radial-data",
+        "radial-families",
+        "rendered-results",
+        "representation-manifests",
+        "scf-densities",
+        "scf-warm-starts",
+        "spatial-grids",
+    }
+)
+
+
+def _initialize_cache_layout(root: Path) -> None:
+    """Discard obsolete application cache layouts exactly once per process."""
+    if root in _INITIALIZED_CACHE_ROOTS:
+        return
+    marker = root / ".cache-format-version"
+    with CACHE_LOCK:
+        if root in _INITIALIZED_CACHE_ROOTS:
+            return
+        try:
+            recorded = marker.read_text(encoding="ascii").strip()
+        except OSError:
+            recorded = ""
+        expected = str(CACHE_FORMAT_VERSION)
+        if recorded != expected:
+            for name in _CACHE_CATEGORIES:
+                child = root / name
+                try:
+                    if child.is_dir():
+                        shutil.rmtree(child)
+                    elif child.exists():
+                        child.unlink()
+                except OSError as exc:
+                    print(f"Could not remove obsolete cache entry {child}: {exc}")
+            temporary = marker.with_name(f".{marker.name}.{os.getpid()}.tmp")
+            try:
+                temporary.write_text(expected, encoding="ascii")
+                temporary.replace(marker)
+            except OSError as exc:
+                print(f"Could not record cache format {expected}: {exc}")
+            finally:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        _INITIALIZED_CACHE_ROOTS.add(root)
 
 
 def cache_root() -> Path | None:
@@ -20,6 +79,7 @@ def cache_root() -> Path | None:
     root = CACHE_DIRECTORY.expanduser().resolve()
     try:
         root.mkdir(parents=True, exist_ok=True)
+        _initialize_cache_layout(root)
     except OSError as exc:
         if not _CACHE_WARNING_SHOWN:
             print(f"Cache disabled because {root} is not writable: {exc}")
@@ -485,7 +545,7 @@ def cache_file(category: str, key: str, suffix: str) -> Path | None:
 
 
 def cache_bundle(category: str, key: str) -> Path | None:
-    """Return a directory whose members are independently mmap-able NPY arrays."""
+    """Return a directory whose array members can be loaded independently."""
     root = cache_root()
     if root is None:
         return None
@@ -522,7 +582,7 @@ def _cache_entry_is_excluded(entry: Path, exclude: Path | None) -> bool:
 
 
 def prune_cache(exclude: Path | None = None) -> None:
-    """Bound disk use while treating every NPY bundle as one cache entry."""
+    """Bound disk use while treating every array bundle as one cache entry."""
     root = cache_root()
     if root is None:
         return
@@ -566,7 +626,7 @@ def atomic_save_array_bundle(
     arrays: dict[str, object],
     metadata: dict[str, object] | None = None,
 ) -> bool:
-    """Atomically write independent uncompressed NPY files plus JSON metadata."""
+    """Atomically write independently loadable arrays plus JSON metadata."""
     if path is None:
         return False
     if any(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) is None for name in arrays):
@@ -586,11 +646,21 @@ def atomic_save_array_bundle(
             manifest_arrays: dict[str, dict[str, object]] = {}
             for name, value in arrays.items():
                 array = np.ascontiguousarray(np.asarray(value))
-                with (temporary / f"{name}.npy").open("wb") as handle:
-                    np.save(handle, array, allow_pickle=False)
+                if CACHE_COMPRESS_ARRAYS:
+                    filename = f"{name}.npz"
+                    with (temporary / filename).open("wb") as handle:
+                        np.savez_compressed(handle, data=array)
+                    storage = "npz-compressed"
+                else:
+                    filename = f"{name}.npy"
+                    with (temporary / filename).open("wb") as handle:
+                        np.save(handle, array, allow_pickle=False)
+                    storage = "npy"
                 manifest_arrays[name] = {
                     "dtype": array.dtype.str,
                     "shape": list(array.shape),
+                    "filename": filename,
+                    "storage": storage,
                 }
             manifest = {
                 "format_version": CACHE_FORMAT_VERSION,
@@ -625,7 +695,7 @@ def load_array_bundle(
     *,
     mmap: bool = True,
 ) -> tuple[dict[str, np.ndarray], dict[str, object]] | None:
-    """Load only requested NPY members, using read-only memory maps by default."""
+    """Load only requested members, mapping uncompressed arrays when possible."""
     if path is None or not path.is_dir():
         return None
     try:
@@ -643,11 +713,22 @@ def load_array_bundle(
             result: dict[str, np.ndarray] = {}
             for name in required_arrays:
                 spec = array_specs[name]
-                array = np.load(
-                    path / f"{name}.npy",
-                    mmap_mode="r" if mmap else None,
-                    allow_pickle=False,
-                )
+                filename = spec.get("filename")
+                storage = spec.get("storage")
+                if not isinstance(filename, str):
+                    raise ValueError(f"cached array {name!r} has no filename")
+                member_path = path / filename
+                if storage == "npz-compressed":
+                    with np.load(member_path, allow_pickle=False) as archive:
+                        array = np.asarray(archive["data"])
+                elif storage == "npy":
+                    array = np.load(
+                        member_path,
+                        mmap_mode="r" if mmap else None,
+                        allow_pickle=False,
+                    )
+                else:
+                    raise ValueError(f"cached array {name!r} has unknown storage")
                 if list(array.shape) != spec.get("shape") or array.dtype.str != spec.get("dtype"):
                     raise ValueError(f"cached array {name!r} disagrees with its manifest")
                 result[name] = array
@@ -687,6 +768,28 @@ def atomic_write_text(path: Path, text: str) -> None:
     )
     try:
         temporary.write_text(text, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def atomic_write_gzip_text(path: Path, text: str) -> None:
+    """Write UTF-8 text as a compact gzip stream using an atomic replacement."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        with gzip.open(
+            temporary,
+            mode="wt",
+            encoding="utf-8",
+            compresslevel=6,
+        ) as handle:
+            handle.write(text)
         temporary.replace(path)
     finally:
         try:
@@ -822,6 +925,5 @@ def select_orbital_basis(
     details = "; ".join(failures)
     raise RuntimeError(
         f"No all-electron relativistic basis was found for {symbol}. "
-        "Upgrade PySCF so that dyall-v2z is available, or install "
-        f"basis-set-exchange. Basis checks: {details}."
+        f"Upgrade PySCF so that dyall-v2z is available. Basis checks: {details}."
     )

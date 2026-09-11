@@ -57,12 +57,10 @@ def build_isosurface_figure(
             density,
             threshold,
         )
-        vertices, faces, _normals, _values = marching_cubes(
-            writable_compiled_array(mesh_density, dtype=np.float32),
-            level=threshold,
-            spacing=(spacing, spacing, spacing),
-            step_size=MARCHING_CUBES_STEP,
-            allow_degenerate=False,
+        vertices, faces = extract_isosurface_mesh(
+            mesh_density,
+            threshold,
+            spacing,
         )
         vertices += axis[0]
         surface_wavefunction = interpolate_surface_values(
@@ -228,7 +226,7 @@ def load_or_build_density_dot_data(
     if loaded is not None:
         arrays, _metadata = loaded
         if all(arrays[name].shape == (DOT_MAP_POINTS,) for name in required):
-            print("Persistent cache hit: mmap density-dot samples.")
+            print("Persistent cache hit: density-dot samples.")
             return arrays, True
     samples = sample_density_dot_data(axis, density)
     if atomic_save_array_bundle(path, samples):
@@ -436,7 +434,7 @@ def load_or_build_angular_plot_data(
             and arrays["left_values"].shape == expected_shape
             and arrays["probability"].shape == expected_shape
         ):
-            print("Persistent cache hit: mmap angular plot data.")
+            print("Persistent cache hit: angular plot data.")
             return arrays, True
     arrays = calculate_angular_plot_data()
     if atomic_save_array_bundle(path, arrays):
@@ -584,7 +582,7 @@ def load_or_build_contour_data(
             and arrays["log_planes"].shape
             == (3, arrays["axis"].size, arrays["axis"].size)
         ):
-            print("Persistent cache hit: mmap contour planes.")
+            print("Persistent cache hit: contour planes.")
             return arrays, True
     arrays = calculate_contour_data(axis, density)
     if atomic_save_array_bundle(path, arrays):
@@ -786,10 +784,10 @@ def lazy_figure_cache_path(visual_key: str, panel_id: str) -> Path:
             "render_version": RESULT_RENDER_VERSION,
         },
     )
-    path = cache_file("lazy-tab-figures", key, ".json")
+    path = cache_file("lazy-tab-figures", key, ".json.gz")
     if path is not None:
         return path
-    return Path.cwd() / f"orbital-tab-{key}.json"
+    return Path.cwd() / f"orbital-tab-{key}.json.gz"
 
 
 def cache_representation_manifest(
@@ -985,7 +983,8 @@ def read_cached_figure_json(path: Path) -> str | None:
     if not path.is_file():
         return None
     try:
-        text = path.read_text(encoding="utf-8")
+        with gzip.open(path, mode="rt", encoding="utf-8") as handle:
+            text = handle.read()
         document = json.loads(text)
         if not isinstance(document, dict) or not isinstance(document.get("data"), list):
             raise ValueError("figure JSON has no data array")
@@ -1000,5 +999,3 @@ def read_cached_figure_json(path: Path) -> str | None:
         except OSError:
             pass
         return None
-
-

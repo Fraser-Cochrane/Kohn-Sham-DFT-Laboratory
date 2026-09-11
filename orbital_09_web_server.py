@@ -18,6 +18,22 @@ app = Flask(__name__)
 CALCULATION_LOCK = threading.Lock()
 
 
+@lru_cache(maxsize=1)
+def plotly_javascript_bundle() -> str:
+    """Load one shared Plotly runtime instead of copying it into every result."""
+    return get_plotlyjs()
+
+
+@app.get("/assets/plotly.min.js")
+def plotly_asset():
+    response = Response(
+        plotly_javascript_bundle(),
+        mimetype="application/javascript",
+    )
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
 @app.get("/")
 def home():
     calibration, samples = laptop_runtime_calibration()
@@ -212,7 +228,7 @@ def lazy_result_tab(visual_key: str, panel_id: str):
                         ),
                     )
                     cached_json = figure.to_json()
-                    atomic_write_text(figure_path, cached_json)
+                    atomic_write_gzip_text(figure_path, cached_json)
                     prune_cache(exclude=figure_path)
                 finally:
                     (
